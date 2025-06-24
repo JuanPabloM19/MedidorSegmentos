@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Medidor de Distancias en PDF</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <style>
+      body {
+        font-family: "Segoe UI", sans-serif;
+        margin: 0;
+        padding: 1rem;
+        background: #f5f7fa;
+        color: #333;
+      }
+      h2 {
+        color: #2c3e50;
+      }
+      .controls {
+        margin-bottom: 1rem;
+      }
+      canvas {
+        border: 1px solid #ccc;
+        max-width: 100%;
+        touch-action: none;
+      }
+      .results {
+        margin-top: 1rem;
+      }
+      .result-entry {
+        margin-bottom: 0.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>Medidor de Distancias en Planos PDF</h2>
+    <div class="controls">
+      <input type="file" accept="application/pdf" onchange="loadPDF(event)" />
+      <label>Escala (cm por pixel): <input id="escala_cm_por_px" type="number" step="0.01" value="0.1" /></label>
+      <button onclick="enableCalibration()">Calibrar con segmento conocido</button>
+      <button onclick="downloadPDF()">Descargar PDF</button>
+      <button onclick="mostrarLargoDelPlano()">Medir largo total del plano</button>
+    </div>
+    <canvas id="canvas"></canvas>
+    <div class="results" id="results"></div>
+
+    <script>
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d");
+      const resultsDiv = document.getElementById("results");
+      const colors = ["red", "blue", "green", "purple", "orange", "brown", "pink", "teal", "gray", "black"];
+      let colorIndex = 0;
+      let scale = 3.5;
+      let pdfDoc, currentPage;
+      let pointPairs = [];
+      let fileBuffer;
+      let calibrating = false;
+      let calibrationPoints = [];
+      let midiendoLargoPlano = false;
+      let puntosLargoPlano = [];
+
+      async function loadPDF(event) {
+        const file = event.target.files[0];
+        const reader = new FileReader();
+        reader.onload = async function () {
+          fileBuffer = reader.result;
+          pdfDoc = await pdfjsLib.getDocument({ data: fileBuffer }).promise;
+          renderPage(1);
+        };
+        reader.readAsArrayBuffer(file);
+      }
+
+      async function renderPage(pageNum) {
+        currentPage = await pdfDoc.getPage(pageNum);
+        const viewport = currentPage.getViewport({ scale });
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const renderContext = {
+          canvasContext: ctx,
+          viewport,
+        };
+        await currentPage.render(renderContext).promise;
+        redrawPoints();
+      }
+
+      function enableCalibration() {
+        calibrating = true;
+        calibrationPoints = [];
+        alert("Hacé clic en dos puntos que representen una distancia conocida en el plano");
+      }
+
+      canvas.addEventListener("click", function (e) {
+        const rect = canvas.getBoundingClientRect();
+        const canvasX = (e.clientX - rect.left) * (canvas.width / rect.width);
+        const canvasY = (e.clientY - rect.top) * (canvas.height / rect.height);
+        const realX = canvasX / scale;
+        const realY = canvasY / scale;
+
+        if (calibrating) {
+          calibrationPoints.push({ realX, realY });
+          ctx.fillStyle = "cyan";
+          ctx.beginPath();
+          ctx.arc(realX * scale, realY * scale, 10, 0, 2 * Math.PI);
+          ctx.fill();
+
+          if (calibrationPoints.length === 2) {
+            const distanciaPx = getDistance(calibrationPoints[0], calibrationPoints[1]);
+            const metros = parseFloat(prompt("¿Cuántos metros hay entre estos puntos?"));
+            if (!isNaN(metros) && metros > 0) {
+              const cmPorPixel = (metros * 100) / distanciaPx;
+              document.getElementById("escala_cm_por_px").value = cmPorPixel.toFixed(4);
+              resultsDiv.innerHTML += `<div class='result-entry' style='color:cyan'>Escala calibrada: ${cmPorPixel.toFixed(4)} cm/px</div>`;
+            }
+            calibrating = false;
+          }
+          return;
+        }
+
+        const color = colors[colorIndex % colors.length];
+        if (!pointPairs[color]) pointPairs[color] = [];
+        pointPairs[color].push({ realX, realY });
+
+        const drawX = realX * scale;
+        const drawY = realY * scale;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(drawX, drawY, 10, 0, 2 * Math.PI);
+        ctx.fill();
+
+        if (pointPairs[color].length === 2) {
+          drawLine(pointPairs[color][0], pointPairs[color][1], color);
+          const distPx = getDistance(pointPairs[color][0], pointPairs[color][1]);
+          const cmPorPx = parseFloat(document.getElementById("escala_cm_por_px").value);
+          const distCm = distPx * cmPorPx;
+          resultsDiv.innerHTML += `<div class='result-entry' style='color:${color}'>Distancia [${color}]: ${distPx.toFixed(2)} px / ${distCm.toFixed(2)} cm</div>`;
+          colorIndex++;
+        }
+      });
+
+      function getDistance(p1, p2) {
+        const dx = p2.realX - p1.realX;
+        const dy = p2.realY - p1.realY;
+        return Math.sqrt(dx * dx + dy * dy) * scale;
+      }
+
+      function drawLine(p1, p2, color) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.moveTo(p1.realX * scale, p1.realY * scale);
+        ctx.lineTo(p2.realX * scale, p2.realY * scale);
+        ctx.stroke();
+
+        const midX = (p1.realX + p2.realX) / 2 * scale;
+        const midY = (p1.realY + p2.realY) / 2 * scale;
+        ctx.fillStyle = color;
+        ctx.font = "bold 24px sans-serif";
+        ctx.fillText(colorIndex, midX - 10, midY - 15);
+      }
+
+      function redrawPoints() {
+        for (const [color, pair] of Object.entries(pointPairs)) {
+          pair.forEach((p) => {
+            const x = p.realX * scale;
+            const y = p.realY * scale;
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(x, y, 10, 0, 2 * Math.PI);
+            ctx.fill();
+          });
+          if (pair.length === 2) drawLine(pair[0], pair[1], color);
+        }
+      }
+
+      function downloadPDF() {
+        const blob = new Blob([fileBuffer], { type: "application/pdf" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "plano.pdf";
+        link.click();
+      }
+
+      function mostrarLargoDelPlano() {
+        midiendoLargoPlano = true;
+        puntosLargoPlano = [];
+        alert("Marcá dos puntos sobre el borde del recuadro negro para medir el largo real del plano (por ejemplo, de izquierda a derecha o de arriba a abajo)");
+      }
+
+      canvas.addEventListener("click", function (e) {
+        if (!midiendoLargoPlano) return;
+
+        const rect = canvas.getBoundingClientRect();
+        const canvasX = (e.clientX - rect.left) * (canvas.width / rect.width);
+        const canvasY = (e.clientY - rect.top) * (canvas.height / rect.height);
+        const realX = canvasX / scale;
+        const realY = canvasY / scale;
+        puntosLargoPlano.push({ realX, realY });
+
+        ctx.fillStyle = "gold";
+        ctx.beginPath();
+        ctx.arc(realX * scale, realY * scale, 12, 0, 2 * Math.PI);
+        ctx.fill();
+
+        if (puntosLargoPlano.length === 2) {
+          const dx = puntosLargoPlano[1].realX - puntosLargoPlano[0].realX;
+          const dy = puntosLargoPlano[1].realY - puntosLargoPlano[0].realY;
+          const distanciaPx = Math.sqrt(dx * dx + dy * dy) * scale;
+          const cmReales = (distanciaPx * 32) / canvas.width;
+
+          ctx.strokeStyle = "gold";
+          ctx.lineWidth = 6;
+          ctx.beginPath();
+          ctx.moveTo(puntosLargoPlano[0].realX * scale, puntosLargoPlano[0].realY * scale);
+          ctx.lineTo(puntosLargoPlano[1].realX * scale, puntosLargoPlano[1].realY * scale);
+          ctx.stroke();
+
+          const midX = (puntosLargoPlano[0].realX + puntosLargoPlano[1].realX) / 2 * scale;
+          const midY = (puntosLargoPlano[0].realY + puntosLargoPlano[1].realY) / 2 * scale;
+          ctx.fillStyle = "gold";
+          ctx.font = "bold 24px sans-serif";
+          ctx.fillText("1 ———— 1", midX - 40, midY - 15);
+
+          resultsDiv.innerHTML += `<div class='result-entry' style='color:gold'>Largo real del plano (escala 1:1): ${cmReales.toFixed(2)} cm</div>`;
+
+          midiendoLargoPlano = false;
+        }
+      }, true);
+    </script>
+  </body>
+</html>
