@@ -30,6 +30,12 @@
       .result-entry {
         margin-bottom: 0.5rem;
       }
+      .delete-button {
+        margin-left: 10px;
+        padding: 2px 6px;
+        font-size: 12px;
+        cursor: pointer;
+      }
     </style>
   </head>
   <body>
@@ -132,10 +138,37 @@
           const distPx = getDistance(pointPairs[color][0], pointPairs[color][1]);
           const cmPorPx = parseFloat(document.getElementById("escala_cm_por_px").value);
           const distCm = distPx * cmPorPx;
-          resultsDiv.innerHTML += `<div class='result-entry' style='color:${color}'>Distancia [${color}]: ${distPx.toFixed(2)} px / ${distCm.toFixed(2)} cm</div>`;
+
+          const idx = colorIndex;
+          const entry = document.createElement("div");
+          entry.className = "result-entry";
+          entry.style.color = color;
+          entry.innerHTML = `Distancia [${color}]: ${distPx.toFixed(2)} px / ${distCm.toFixed(2)} cm <button class='delete-button' onclick='eliminarSegmento(${idx})'>Eliminar</button>`;
+          resultsDiv.appendChild(entry);
+
           colorIndex++;
         }
       });
+
+      function eliminarSegmento(index) {
+        const color = colors[index % colors.length];
+        delete pointPairs[color];
+        redrawTodo();
+        resultsDiv.innerHTML = "";
+        for (let i = 0; i < colorIndex; i++) {
+          const col = colors[i % colors.length];
+          if (pointPairs[col] && pointPairs[col].length === 2) {
+            const distPx = getDistance(pointPairs[col][0], pointPairs[col][1]);
+            const cmPorPx = parseFloat(document.getElementById("escala_cm_por_px").value);
+            const distCm = distPx * cmPorPx;
+            const entry = document.createElement("div");
+            entry.className = "result-entry";
+            entry.style.color = col;
+            entry.innerHTML = `Distancia [${col}]: ${distPx.toFixed(2)} px / ${distCm.toFixed(2)} cm <button class='delete-button' onclick='eliminarSegmento(${i})'>Eliminar</button>`;
+            resultsDiv.appendChild(entry);
+          }
+        }
+      }
 
       function getDistance(p1, p2) {
         const dx = p2.realX - p1.realX;
@@ -156,6 +189,10 @@
         ctx.fillStyle = color;
         ctx.font = "bold 24px sans-serif";
         ctx.fillText(colorIndex, midX - 10, midY - 15);
+      }
+
+      function redrawTodo() {
+        renderPage(1);
       }
 
       function redrawPoints() {
