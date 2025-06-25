@@ -76,16 +76,17 @@
         pointer-events: none;
       }
       .snap-indicator {
-        position: absolute;
+        position: fixed;
         width: 20px;
         height: 20px;
-        border: 2px solid #e74c3c;
+        border: 3px solid #ff0000;
         border-radius: 50%;
         pointer-events: none;
         transform: translate(-50%, -50%);
         display: none;
-        background: rgba(231, 76, 60, 0.2);
-        z-index: 10;
+        background: rgba(255, 0, 0, 0.2);
+        z-index: 9999;
+        box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
       }
       .help-text {
         margin-top: 10px;
@@ -154,7 +155,7 @@
       let puntosLargoPlano = [];
       
       let snapEnabled = true;
-      let snapRadius = 20;
+      let snapRadius = 30; // Radio más grande para mejor detección
       let edgePoints = [];
 
       // Función para obtener coordenadas correctas del mouse
@@ -206,38 +207,50 @@
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const data = imageData.data;
         
-        for (let y = 2; y < canvas.height - 2; y += 2) {
-          for (let x = 2; x < canvas.width - 2; x += 2) {
+        // Detectar intersecciones y puntos de líneas con algoritmo mejorado
+        for (let y = 5; y < canvas.height - 5; y += 2) {
+          for (let x = 5; x < canvas.width - 5; x += 2) {
             const idx = (y * canvas.width + x) * 4;
             
+            // Verificar si es un píxel oscuro (línea)
             const current = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
             
-            const neighbors = [
-              (data[idx - 4] + data[idx - 3] + data[idx - 2]) / 3,
-              (data[idx + 4] + data[idx + 5] + data[idx + 6]) / 3,
-              (data[(y-1) * canvas.width * 4 + x * 4] + data[(y-1) * canvas.width * 4 + x * 4 + 1] + data[(y-1) * canvas.width * 4 + x * 4 + 2]) / 3,
-              (data[(y+1) * canvas.width * 4 + x * 4] + data[(y+1) * canvas.width * 4 + x * 4 + 1] + data[(y+1) * canvas.width * 4 + x * 4 + 2]) / 3
-            ];
-            
-            let maxDiff = 0;
-            for (let neighbor of neighbors) {
-              const diff = Math.abs(current - neighbor);
-              if (diff > maxDiff) maxDiff = diff;
-            }
-            
-            if (maxDiff > 40) {
-              edgePoints.push({ x, y });
+            if (current < 200) { // Píxel oscuro (parte de una línea)
+              // Verificar si es intersección o punto significativo
+              let lineCount = 0;
+              const directions = [
+                [-1, 0], [1, 0], [0, -1], [0, 1], // horizontal y vertical
+                [-1, -1], [1, 1], [-1, 1], [1, -1] // diagonales
+              ];
+              
+              for (let [dx, dy] of directions) {
+                const checkX = x + dx * 3;
+                const checkY = y + dy * 3;
+                if (checkX >= 0 && checkX < canvas.width && checkY >= 0 && checkY < canvas.height) {
+                  const checkIdx = (checkY * canvas.width + checkX) * 4;
+                  const checkColor = (data[checkIdx] + data[checkIdx + 1] + data[checkIdx + 2]) / 3;
+                  if (checkColor < 200) {
+                    lineCount++;
+                  }
+                }
+              }
+              
+              // Si hay líneas en múltiples direcciones, es una intersección
+              if (lineCount >= 3) {
+                edgePoints.push({ x, y });
+              }
             }
           }
         }
-        console.log(`Detectados ${edgePoints.length} puntos de borde`);
+        
+        console.log(`Detectados ${edgePoints.length} puntos de intersección`);
       }
 
       function findSnapPoint(canvasX, canvasY) {
         if (!snapEnabled || edgePoints.length === 0) return null;
         
         let closestPoint = null;
-        let minDistance = snapRadius * (scale / baseScale); // Ajustar radio según zoom
+        let minDistance = snapRadius; // Radio fijo independiente del zoom
         
         for (let point of edgePoints) {
           const distance = Math.sqrt(
@@ -357,17 +370,24 @@
         const snapPoint = findSnapPoint(coords.canvasX, coords.canvasY);
         
         if (snapPoint) {
-          // Posicionar el indicador correctamente respecto al contenedor
-          const containerRect = canvasContainer.getBoundingClientRect();
-          const snapScreenX = (snapPoint.x / canvas.width) * canvas.offsetWidth - canvasContainer.scrollLeft;
-          const snapScreenY = (snapPoint.y / canvas.height) * canvas.offsetHeight - canvasContainer.scrollTop;
+          // Posición absoluta en la ventana
+          const canvasRect = canvas.getBoundingClientRect();
           
-          snapIndicator.style.left = (containerRect.left + snapScreenX) + 'px';
-          snapIndicator.style.top = (containerRect.top + snapScreenY) + 'px';
+          // Calcular posición del snap point en coordenadas de pantalla
+          const snapScreenX = canvasRect.left + (snapPoint.x / canvas.width) * canvasRect.width;
+          const snapScreenY = canvasRect.top + (snapPoint.y / canvas.height) * canvasRect.height;
+          
+          snapIndicator.style.left = snapScreenX + 'px';
+          snapIndicator.style.top = snapScreenY + 'px';
           snapIndicator.style.display = 'block';
         } else {
           snapIndicator.style.display = 'none';
         }
+      });
+
+      // Ocultar indicador cuando el mouse sale del canvas
+      canvas.addEventListener("mouseleave", function() {
+        snapIndicator.style.display = 'none';
       });
 
       function eliminarSegmento(index) {
@@ -460,6 +480,8 @@
         scale *= 1.2;
         renderPage(1);
         updateZoomInfo();
+        // Re-detectar puntos de borde después del zoom
+        setTimeout(detectEdgePoints, 300);
       }
 
       function zoomOut() {
@@ -467,12 +489,16 @@
         if (scale < 0.5) scale = 0.5;
         renderPage(1);
         updateZoomInfo();
+        // Re-detectar puntos de borde después del zoom
+        setTimeout(detectEdgePoints, 300);
       }
 
       function resetZoom() {
         scale = baseScale;
         renderPage(1);
         updateZoomInfo();
+        // Re-detectar puntos de borde después del reset
+        setTimeout(detectEdgePoints, 300);
       }
 
       function updateZoomInfo() {
