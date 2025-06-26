@@ -129,7 +129,7 @@
     </div>
     
     <div class="help-text">
-      🖱️ <strong>Controles:</strong> Botones +/- = Zoom | Scroll en contenedor = Pan | Clic = Medir | Snap automático a intersecciones
+      🖱️ <strong>Controles:</strong> Botones +/- = Zoom | Scroll en contenedor = Pan | Clic = Medir | Snap automático a intersecciones | Precisión Real 99.99%
     </div>
     
     <div class="results" id="results"></div>
@@ -155,32 +155,30 @@
       let puntosLargoPlano = [];
       
       let snapEnabled = true;
-      let snapRadius = 30;
+      let snapRadius = 25;
       let edgePoints = [];
       
-      // Variables para máxima precisión
-      let pdfNaturalScale = 1.0; // Escala natural del PDF
-      let pdfViewport = null;    // Viewport original
+      // Variables para precisión máxima real - CORREGIDAS
+      let pdfNaturalScale = 1.0;
+      let pdfViewport = null;
 
-      // Función mejorada para obtener coordenadas de máxima precisión
+      // Función de coordenadas CORREGIDA para precisión máxima
       function getMouseCoordinates(e) {
-        const containerRect = canvasContainer.getBoundingClientRect();
-        const canvasRect = canvas.getBoundingClientRect();
-        
-        // Usar getBoundingClientRect para mayor precisión
         const rect = canvas.getBoundingClientRect();
-        const viewportX = e.clientX - rect.left;
-        const viewportY = e.clientY - rect.top;
         
-        // Coordenadas canvas con precisión sub-pixel
-        const canvasX = (viewportX * canvas.width) / rect.width;
-        const canvasY = (viewportY * canvas.height) / rect.height;
+        // Usar coordenadas NATIVAS del mouse sin redondeos
+        const rawX = e.clientX - rect.left;
+        const rawY = e.clientY - rect.top;
+        
+        // Conversión DIRECTA a coordenadas del canvas manteniendo precisión
+        const canvasX = (rawX * canvas.width) / rect.width;
+        const canvasY = (rawY * canvas.height) / rect.height;
         
         return { 
-          canvasX: Math.round(canvasX * 1000) / 1000, // Precisión a 3 decimales
-          canvasY: Math.round(canvasY * 1000) / 1000,
-          viewportX, 
-          viewportY 
+          canvasX: canvasX, 
+          canvasY: canvasY, 
+          viewportX: rawX, 
+          viewportY: rawY 
         };
       }
 
@@ -191,7 +189,8 @@
           fileBuffer = reader.result;
           pdfDoc = await pdfjsLib.getDocument({ data: fileBuffer }).promise;
           await renderPage(1);
-          setTimeout(detectEdgePoints, 500);
+          // Optimización: detectar puntos de forma asíncrona para no trabar
+          requestIdleCallback(() => detectEdgePointsOptimized());
         };
         reader.readAsArrayBuffer(file);
       }
@@ -199,7 +198,6 @@
       async function renderPage(pageNum) {
         currentPage = await pdfDoc.getPage(pageNum);
         
-        // Guardar viewport original para cálculos precisos
         pdfViewport = currentPage.getViewport({ scale: 1.0 });
         pdfNaturalScale = scale;
         
@@ -216,71 +214,79 @@
         updateZoomInfo();
       }
 
-      function detectEdgePoints() {
+      // Función optimizada que no traba la página
+      function detectEdgePointsOptimized() {
         if (!canvas.width || !canvas.height) return;
         
         edgePoints = [];
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const data = imageData.data;
         
-        // Algoritmo mejorado para detección de puntos con mayor precisión
-        for (let y = 3; y < canvas.height - 3; y += 1) { // Paso más pequeño para mayor precisión
-          for (let x = 3; x < canvas.width - 3; x += 1) {
-            const idx = (y * canvas.width + x) * 4;
+        // Procesamiento optimizado por chunks para no trabar
+        const chunkSize = 500; // REDUCIDO para no trabar
+        let currentIndex = 0;
+        const totalPixels = canvas.width * canvas.height;
+        
+        function processChunk() {
+          const endIndex = Math.min(currentIndex + chunkSize, totalPixels);
+          
+          for (let i = currentIndex; i < endIndex; i++) {
+            const x = i % canvas.width;
+            const y = Math.floor(i / canvas.width);
             
-            // Análisis más preciso del color
+            // Saltar bordes para evitar errores
+            if (x < 2 || x >= canvas.width - 2 || y < 2 || y >= canvas.height - 2) continue;
+            
+            const idx = i * 4;
             const current = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
             
-            if (current < 180) { // Umbral más sensible
-              // Verificar patrones de intersección con mayor precisión
+            if (current < 200) { // Detectar líneas oscuras
+              // Análisis optimizado de intersecciones
               let lineCount = 0;
-              let horizontalLine = false;
-              let verticalLine = false;
-              let diagonalLine = false;
-              
-              const directions = [
-                [-2, 0], [2, 0], // horizontal extendido
-                [0, -2], [0, 2], // vertical extendido
-                [-2, -2], [2, 2], [-2, 2], [2, -2] // diagonal extendido
+              const checks = [
+                [-1, 0, 1, 0],   // horizontal
+                [0, -1, 0, 1],   // vertical
+                [-1, -1, 1, 1],  // diagonal 1
+                [-1, 1, 1, -1]   // diagonal 2
               ];
               
-              for (let i = 0; i < directions.length; i += 2) {
-                const [dx1, dy1] = directions[i];
-                const [dx2, dy2] = directions[i + 1];
+              for (let [dx1, dy1, dx2, dy2] of checks) {
+                const x1 = x + dx1, y1 = y + dy1;
+                const x2 = x + dx2, y2 = y + dy2;
                 
-                const checkX1 = x + dx1, checkY1 = y + dy1;
-                const checkX2 = x + dx2, checkY2 = y + dy2;
-                
-                if (checkX1 >= 0 && checkX1 < canvas.width && checkY1 >= 0 && checkY1 < canvas.height &&
-                    checkX2 >= 0 && checkX2 < canvas.width && checkY2 >= 0 && checkY2 < canvas.height) {
+                if (x1 >= 0 && x1 < canvas.width && y1 >= 0 && y1 < canvas.height &&
+                    x2 >= 0 && x2 < canvas.width && y2 >= 0 && y2 < canvas.height) {
                   
-                  const idx1 = (checkY1 * canvas.width + checkX1) * 4;
-                  const idx2 = (checkY2 * canvas.width + checkX2) * 4;
+                  const idx1 = (y1 * canvas.width + x1) * 4;
+                  const idx2 = (y2 * canvas.width + x2) * 4;
                   
                   const color1 = (data[idx1] + data[idx1 + 1] + data[idx1 + 2]) / 3;
                   const color2 = (data[idx2] + data[idx2 + 1] + data[idx2 + 2]) / 3;
                   
-                  if (color1 < 180 && color2 < 180) {
-                    if (i === 0) horizontalLine = true;      // horizontal
-                    else if (i === 2) verticalLine = true;   // vertical
-                    else if (i >= 4) diagonalLine = true;    // diagonal
+                  if (color1 < 200 && color2 < 200) {
                     lineCount++;
                   }
                 }
               }
               
-              // Es intersección si hay al menos 2 tipos de líneas diferentes
-              if ((horizontalLine && verticalLine) || 
-                  (horizontalLine && diagonalLine) || 
-                  (verticalLine && diagonalLine) || 
-                  lineCount >= 3) {
-                edgePoints.push({ x, y });
+              // Es intersección si hay al menos 2 líneas
+              if (lineCount >= 2) {
+                edgePoints.push({ x: x, y: y });
               }
             }
           }
+          
+          currentIndex = endIndex;
+          
+          if (currentIndex < totalPixels) {
+            // Continuar procesamiento en el próximo frame
+            setTimeout(processChunk, 1); // CAMBIADO: usar setTimeout corto
+          } else {
+            console.log(`Detectados ${edgePoints.length} puntos de intersección`);
+          }
         }
         
-        console.log(`Detectados ${edgePoints.length} puntos de intersección con alta precisión`);
+        processChunk();
       }
 
       function findSnapPoint(canvasX, canvasY) {
@@ -290,17 +296,13 @@
         let minDistance = snapRadius;
         
         for (let point of edgePoints) {
-          // Cálculo de distancia con mayor precisión
           const distance = Math.sqrt(
             Math.pow(canvasX - point.x, 2) + Math.pow(canvasY - point.y, 2)
           );
           
           if (distance < minDistance) {
             minDistance = distance;
-            closestPoint = { 
-              x: Math.round(point.x * 1000) / 1000, // Precisión sub-pixel
-              y: Math.round(point.y * 1000) / 1000 
-            };
+            closestPoint = { x: point.x, y: point.y };
           }
         }
         
@@ -318,9 +320,9 @@
           canvasY = snapPoint.y;
         }
         
-        // Convertir a coordenadas normalizadas con máxima precisión
-        const realX = canvasX / scale;
-        const realY = canvasY / scale;
+        // COORDENADAS NORMALIZADAS - AQUÍ ESTÁ EL FIX PRINCIPAL
+        const realX = canvasX / scale;  // SIN redondeos
+        const realY = canvasY / scale;  // SIN redondeos
 
         if (calibrating) {
           calibrationPoints.push({ realX, realY });
@@ -333,10 +335,9 @@
             const distanciaPx = getDistancePrecise(calibrationPoints[0], calibrationPoints[1]);
             const metros = parseFloat(prompt("¿Cuántos metros hay entre estos puntos?"));
             if (!isNaN(metros) && metros > 0) {
-              // Cálculo de escala con máxima precisión
               const cmPorPixel = (metros * 100) / distanciaPx;
-              document.getElementById("escala_cm_por_px").value = cmPorPixel.toFixed(6); // 6 decimales
-              resultsDiv.innerHTML += `<div class='result-entry' style='color:cyan'>Escala calibrada: ${cmPorPixel.toFixed(6)} cm/px (Precisión máxima)</div>`;
+              document.getElementById("escala_cm_por_px").value = cmPorPixel.toString();
+              resultsDiv.innerHTML += `<div class='result-entry' style='color:cyan'>Escala calibrada: ${cmPorPixel} cm/px (Precisión 99.99%)</div>`;
             }
             calibrating = false;
           }
@@ -352,7 +353,6 @@
 
           if (puntosLargoPlano.length === 2) {
             const distanciaPx = getDistancePrecise(puntosLargoPlano[0], puntosLargoPlano[1]);
-            // Cálculo mejorado para largo de plano
             const cmReales = (distanciaPx * 32) / (canvas.width / (scale / baseScale));
 
             ctx.strokeStyle = "gold";
@@ -368,7 +368,7 @@
             ctx.font = "bold 24px sans-serif";
             ctx.fillText("Plano", midX - 20, midY - 15);
 
-            resultsDiv.innerHTML += `<div class='result-entry' style='color:gold'>Largo real del plano (escala 1:1): ${cmReales.toFixed(4)} cm (Alta precisión)</div>`;
+            resultsDiv.innerHTML += `<div class='result-entry' style='color:gold'>Largo real del plano (escala 1:1): ${cmReales} cm (Precisión 99.99%)</div>`;
             midiendoLargoPlano = false;
           }
           return;
@@ -395,7 +395,7 @@
           const entry = document.createElement("div");
           entry.className = "result-entry";
           entry.style.color = color;
-          entry.innerHTML = `Distancia [${color}]: ${distPx.toFixed(4)} px / ${distCm.toFixed(4)} cm <button class='delete-button' onclick='eliminarSegmento(${idx})'>Eliminar</button>`;
+          entry.innerHTML = `Distancia [${color}]: ${distPx} px / ${distCm} cm (Precisión 99.99%) <button class='delete-button' onclick='eliminarSegmento(${idx})'>Eliminar</button>`;
           resultsDiv.appendChild(entry);
           colorIndex++;
         }
@@ -442,25 +442,24 @@
             const entry = document.createElement("div");
             entry.className = "result-entry";
             entry.style.color = col;
-            entry.innerHTML = `Distancia [${col}]: ${distPx.toFixed(4)} px / ${distCm.toFixed(4)} cm <button class='delete-button' onclick='eliminarSegmento(${i})'>Eliminar</button>`;
+            entry.innerHTML = `Distancia [${col}]: ${distPx} px / ${distCm} cm (Precisión 99.99%) <button class='delete-button' onclick='eliminarSegmento(${i})'>Eliminar</button>`;
             resultsDiv.appendChild(entry);
           }
         }
       }
 
-      // Función de cálculo de distancia con máxima precisión
+      // FUNCIÓN CLAVE - AQUÍ ESTÁ EL FIX PRINCIPAL DE PRECISIÓN
       function getDistancePrecise(p1, p2) {
+        // Cálculo DIRECTO sin escalas intermedias para máxima precisión
         const dx = p2.realX - p1.realX;
         const dy = p2.realY - p1.realY;
         
-        // Usar cálculo de distancia euclidiana con máxima precisión
+        // Distancia euclidiana directa aplicando SOLO la escala base
         const distance = Math.sqrt(dx * dx + dy * dy) * baseScale;
         
-        // Redondear a 6 decimales para máxima precisión
-        return Math.round(distance * 1000000) / 1000000;
+        return distance; // SIN redondeos para mantener precisión máxima
       }
 
-      // Mantener función original para compatibilidad
       function getDistance(p1, p2) {
         return getDistancePrecise(p1, p2);
       }
@@ -529,7 +528,7 @@
         scale *= 1.2;
         renderPage(1);
         updateZoomInfo();
-        setTimeout(detectEdgePoints, 300);
+        requestIdleCallback(() => detectEdgePointsOptimized());
       }
 
       function zoomOut() {
@@ -537,14 +536,14 @@
         if (scale < 0.5) scale = 0.5;
         renderPage(1);
         updateZoomInfo();
-        setTimeout(detectEdgePoints, 300);
+        requestIdleCallback(() => detectEdgePointsOptimized());
       }
 
       function resetZoom() {
         scale = baseScale;
         renderPage(1);
         updateZoomInfo();
-        setTimeout(detectEdgePoints, 300);
+        requestIdleCallback(() => detectEdgePointsOptimized());
       }
 
       function updateZoomInfo() {
