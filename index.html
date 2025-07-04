@@ -200,6 +200,12 @@
         return numero.toFixed(2);
       }
 
+      // NUEVA FUNCIÓN para formatear metros con coma decimal
+      function formatearMetros(centimetros) {
+        const metros = centimetros / 10000;
+        return metros.toFixed(2).replace('.', ',');
+      }
+
       // Función para actualizar el campo de escala
       function actualizarCampoEscala(valor) {
         const campoEscala = document.getElementById("escala_cm_por_px");
@@ -454,9 +460,9 @@
             ctx.font = "bold 24px sans-serif";
             ctx.fillText("Plano", midX - 20, midY - 15);
 
-            resultsDiv.innerHTML += `<div class='result-entry' style='color:gold'>Largo real del plano (escala 1:1): ${formatearEscala(
+            resultsDiv.innerHTML += `<div class='result-entry' style='color:gold'>Largo real del plano (escala 1:1): ${formatearMetros(
               cmReales
-            )} cm (Precisión 99.99%)</div>`;
+            )} m (Precisión 99.99%)</div>`;
             midiendoLargoPlano = false;
           }
           return;
@@ -490,9 +496,7 @@
           entry.style.color = color;
           entry.innerHTML = `Distancia [${color}]: ${formatearConDecimales(
             distPx
-          )} px / ${formatearConDecimales(
-            distCm
-          )} cm (Precisión 99.99%) <button class='delete-button' onclick='eliminarSegmento(${idx})'>Eliminar</button>`;
+          )} px / ${formatearMetros(distCm)} m (Precisión 99.99%) <button class='delete-button' onclick='eliminarSegmento(${idx})'>Eliminar</button>`;
           resultsDiv.appendChild(entry);
           colorIndex++;
         }
@@ -548,9 +552,7 @@
             entry.style.color = col;
             entry.innerHTML = `Distancia [${col}]: ${formatearConDecimales(
               distPx
-            )} px / ${formatearConDecimales(
-              distCm
-            )} cm (Precisión 99.99%) <button class='delete-button' onclick='eliminarSegmento(${i})'>Eliminar</button>`;
+            )} px / ${formatearMetros(distCm)} m (Precisión 99.99%) <button class='delete-button' onclick='eliminarSegmento(${i})'>Eliminar</button>`;
             resultsDiv.appendChild(entry);
           }
         }
