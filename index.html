@@ -36,6 +36,12 @@
         touch-action: none;
         cursor: crosshair;
       }
+      canvas.pan-mode {
+        cursor: grab;
+      }
+      canvas.dragging {
+        cursor: grabbing;
+      }
       .results {
         margin-top: 1rem;
       }
@@ -122,6 +128,9 @@
         <button onclick="resetZoom()">↺ Reset</button>
       </div>
       <div class="control-group">
+        <button onclick="toggleMode()" id="modeButton">
+          📏 Modo: <span id="modeStatus">SEGMENTOS</span>
+        </button>
         <button onclick="toggleSnapMode()">
           🧲 Snap: <span id="snapStatus">ON</span>
         </button>
@@ -138,8 +147,7 @@
     </div>
 
     <div class="help-text">
-      🖱️ <strong>Controles:</strong> Botones +/- = Zoom | Scroll en contenedor =
-      Pan | Clic = Medir | Snap automático a intersecciones | Precisión Real
+      🖱️ <strong>Controles:</strong> Botón "Modo" = Cambiar entre Segmentos/Manito | Botones +/- = Zoom | Clic en modo Segmentos = Medir | Clic y arrastrar en modo Manito = Mover | Snap automático a intersecciones | Precisión Real
       99.99%
     </div>
 
@@ -179,6 +187,14 @@
       let snapEnabled = true;
       let snapRadius = 25;
       let edgePoints = [];
+
+      // Variables para arrastre
+      let isDragging = false;
+      let dragStartX = 0;
+      let dragStartY = 0;
+      let scrollStartX = 0;
+      let scrollStartY = 0;
+      let panMode = false; // Modo pan/segmentos
 
       // Variables para precisión máxima real - CORREGIDAS
       let pdfNaturalScale = 1.0;
@@ -379,7 +395,72 @@
         return closestPoint;
       }
 
+      // Eventos de arrastre
+      canvas.addEventListener("mousedown", function(e) {
+        if (panMode) {
+          isDragging = true;
+          canvas.classList.add('dragging');
+          dragStartX = e.clientX;
+          dragStartY = e.clientY;
+          scrollStartX = canvasContainer.scrollLeft;
+          scrollStartY = canvasContainer.scrollTop;
+          e.preventDefault();
+        }
+      });
+
+      canvas.addEventListener("mousemove", function(e) {
+        if (isDragging) {
+          const deltaX = e.clientX - dragStartX;
+          const deltaY = e.clientY - dragStartY;
+          
+          canvasContainer.scrollLeft = scrollStartX - deltaX;
+          canvasContainer.scrollTop = scrollStartY - deltaY;
+          
+          e.preventDefault();
+          return;
+        }
+
+        // Código existente de snap
+        if (!snapEnabled) {
+          snapIndicator.style.display = "none";
+          return;
+        }
+
+        const coords = getMouseCoordinates(e);
+        const snapPoint = findSnapPoint(coords.canvasX, coords.canvasY);
+
+        if (snapPoint) {
+          const canvasRect = canvas.getBoundingClientRect();
+
+          const snapScreenX =
+            canvasRect.left + (snapPoint.x / canvas.width) * canvasRect.width;
+          const snapScreenY =
+            canvasRect.top + (snapPoint.y / canvas.height) * canvasRect.height;
+
+          snapIndicator.style.left = snapScreenX + "px";
+          snapIndicator.style.top = snapScreenY + "px";
+          snapIndicator.style.display = "block";
+        } else {
+          snapIndicator.style.display = "none";
+        }
+      });
+
+      canvas.addEventListener("mouseup", function(e) {
+        if (isDragging) {
+          isDragging = false;
+          canvas.classList.remove('dragging');
+          return;
+        }
+      });
+
+      document.addEventListener("mouseup", function(e) {
+        isDragging = false;
+        canvas.classList.remove('dragging');
+      });
+
       canvas.addEventListener("click", function (e) {
+        if (isDragging || panMode) return;
+        
         const coords = getMouseCoordinates(e);
         let canvasX = coords.canvasX;
         let canvasY = coords.canvasY;
@@ -499,31 +580,6 @@
           )} px / ${formatearMetros(distCm)} m (Precisión 99.99%) <button class='delete-button' onclick='eliminarSegmento(${idx})'>Eliminar</button>`;
           resultsDiv.appendChild(entry);
           colorIndex++;
-        }
-      });
-
-      canvas.addEventListener("mousemove", function (e) {
-        if (!snapEnabled) {
-          snapIndicator.style.display = "none";
-          return;
-        }
-
-        const coords = getMouseCoordinates(e);
-        const snapPoint = findSnapPoint(coords.canvasX, coords.canvasY);
-
-        if (snapPoint) {
-          const canvasRect = canvas.getBoundingClientRect();
-
-          const snapScreenX =
-            canvasRect.left + (snapPoint.x / canvas.width) * canvasRect.width;
-          const snapScreenY =
-            canvasRect.top + (snapPoint.y / canvas.height) * canvasRect.height;
-
-          snapIndicator.style.left = snapScreenX + "px";
-          snapIndicator.style.top = snapScreenY + "px";
-          snapIndicator.style.display = "block";
-        } else {
-          snapIndicator.style.display = "none";
         }
       });
 
@@ -665,6 +721,22 @@
       function updateZoomInfo() {
         const percentage = Math.round((scale / baseScale) * 350);
         zoomInfo.textContent = `Zoom: ${percentage}%`;
+      }
+
+      function toggleMode() {
+        panMode = !panMode;
+        const modeStatus = document.getElementById("modeStatus");
+        const modeButton = document.getElementById("modeButton");
+        
+        if (panMode) {
+          modeStatus.textContent = "MANITO";
+          modeButton.innerHTML = "✋ Modo: <span id=\"modeStatus\">MANITO</span>";
+          canvas.classList.add('pan-mode');
+        } else {
+          modeStatus.textContent = "SEGMENTOS";
+          modeButton.innerHTML = "📏 Modo: <span id=\"modeStatus\">SEGMENTOS</span>";
+          canvas.classList.remove('pan-mode');
+        }
       }
 
       function toggleSnapMode() {
